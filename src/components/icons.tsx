@@ -73,4 +73,5 @@ export const Icons = {
   truck: Truck,
   logo: LlevaImageLogo,
   locateFixed: LocateFixed, // Added icon
+  spinner: Loader2, // Added spinner icon
 };
