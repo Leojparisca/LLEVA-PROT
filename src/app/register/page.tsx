@@ -1,11 +1,11 @@
-
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation"; // Import useRouter
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,13 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Icons } from "@/components/icons";
 import { useToast } from "@/hooks/use-toast";
+import { signUp } from "@/lib/auth";
+import { createClient } from "@/lib/supabase";
 
 const registerSchema = z.object({
   fullName: z.string().min(2, { message: "El nombre completo debe tener al menos 2 caracteres" }),
-  emailOrPhone: z.string().min(1, { message: "Email o Número de Teléfono es requerido" })
-    .refine(value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) || /^\+?[1-9]\d{1,14}$/.test(value), {
-      message: "Por favor, ingrese un email o número de teléfono válido (ej: +1234567890)"
-    }),
+  email: z.string().email({ message: "Por favor, ingresa un email válido" }),
   password: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres" }),
   confirmPassword: z.string().min(6, { message: "Por favor, confirma tu contraseña" }),
   userType: z.enum(["customer", "driver", "delivery_person"], { required_error: "Por favor, selecciona un tipo de cuenta" }),
@@ -33,44 +32,77 @@ type RegisterFormValues = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
   const { toast } = useToast();
-  const router = useRouter(); // Initialize router
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
       fullName: "",
-      emailOrPhone: "",
+      email: "",
       password: "",
       confirmPassword: "",
       userType: undefined,
     },
   });
 
-  function onSubmit(values: RegisterFormValues) {
-    console.log("Registration submitted:", values);
-    // TODO: Implement actual registration logic
+  async function onSubmit(values: RegisterFormValues) {
+    setIsLoading(true);
     
-    if (values.userType === "customer") {
+    try {
+      const { data, error } = await signUp(values.email, values.password, values.fullName, values.userType);
+      
+      if (error) {
+        toast({
+          title: "Error de Registro",
+          description: error.message === "User already registered"
+            ? "Ya existe una cuenta con este email."
+            : error.message,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (data.user) {
+        // Create user profile in the database
+        const supabase = createClient();
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: data.user.id,
+            full_name: values.fullName,
+            user_type: values.userType,
+          });
+
+        if (profileError) {
+          console.error("Profile creation error:", profileError);
+          // Don't show error to user as auth was successful
+        }
+
+        toast({
+          title: "¡Registro Exitoso!",
+          description: "Verifica tu email para activar tu cuenta.",
+        });
+
+        // Redirect based on user type
+        if (values.userType === "customer") {
+          router.push("/profile");
+        } else if (values.userType === "driver") {
+          router.push("/driver-profile");
+        } else if (values.userType === "delivery_person") {
+          router.push("/profile"); // Could be a delivery-person-profile page in the future
+        }
+      }
+    } catch (error) {
+      console.error("Registration error:", error);
       toast({
-        title: "¡Registro Exitoso!",
-        description: "Serás redirigido para completar tu perfil.",
+        title: "Error de Conexión",
+        description: "No se pudo conectar con el servidor. Inténtalo de nuevo.",
+        variant: "destructive",
       });
-      router.push("/profile"); 
-    } else if (values.userType === "driver") {
-      toast({
-        title: "¡Paso 1 Completado!",
-        description: "Serás redirigido para completar tu perfil de conductor.",
-      });
-      router.push("/driver-profile"); // Redirect to driver profile page
-    } else if (values.userType === "delivery_person") {
-       toast({
-        title: "Registro Enviado (Simulación)",
-        description: "La funcionalidad de registro para repartidores aún no está implementada completamente. Serás redirigido para completar tu perfil de repartidor (Próximamente).",
-      });
-      // Potentially redirect to a delivery_person-profile page in the future
-      // router.push("/delivery-person-profile"); 
-      router.push("/"); // Placeholder redirect
+    } finally {
+      setIsLoading(false);
     }
-    // form.reset(); // Reset form only if not redirecting or based on specific logic
   }
 
   const handleAffiliateCommerce = () => {
@@ -99,7 +131,11 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel>Nombre Completo</FormLabel>
                     <FormControl>
-                      <Input placeholder="Juan Pérez" {...field} />
+                      <Input 
+                        placeholder="Juan Pérez" 
+                        disabled={isLoading}
+                        {...field} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -107,12 +143,17 @@ export default function RegisterPage() {
               />
               <FormField
                 control={form.control}
-                name="emailOrPhone"
+                name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email o Número de Teléfono</FormLabel>
+                    <FormLabel>Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="tu@ejemplo.com o +1234567890" {...field} />
+                      <Input 
+                        type="email"
+                        placeholder="tu@ejemplo.com" 
+                        disabled={isLoading}
+                        {...field} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -125,7 +166,12 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel>Contraseña</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} />
+                      <Input 
+                        type="password" 
+                        placeholder="••••••••" 
+                        disabled={isLoading}
+                        {...field} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -138,7 +184,12 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel>Confirmar Contraseña</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} />
+                      <Input 
+                        type="password" 
+                        placeholder="••••••••" 
+                        disabled={isLoading}
+                        {...field} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -150,7 +201,7 @@ export default function RegisterPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Soy un...</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isLoading}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Selecciona tipo de cuenta" />
@@ -166,8 +217,19 @@ export default function RegisterPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full text-lg py-6 mt-2">
-                Registrarse
+              <Button 
+                type="submit" 
+                className="w-full text-lg py-6 mt-2"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
+                    Registrándose...
+                  </>
+                ) : (
+                  "Registrarse"
+                )}
               </Button>
             </form>
           </Form>

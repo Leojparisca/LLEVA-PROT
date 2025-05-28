@@ -1,11 +1,11 @@
-
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation"; // Import useRouter
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,10 +13,10 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Icons } from "@/components/icons";
 import { useToast } from "@/hooks/use-toast";
-
+import { signIn } from "@/lib/auth";
 
 const loginSchema = z.object({
-  emailOrPhone: z.string().min(1, { message: "Email o Número de Teléfono es requerido" }),
+  email: z.string().email({ message: "Por favor, ingresa un email válido" }),
   password: z.string().min(6, { message: "La contraseña debe tener al menos 6 caracteres" }),
 });
 
@@ -24,30 +24,61 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const { toast } = useToast();
-  const router = useRouter(); // Initialize router
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      emailOrPhone: "",
+      email: "",
       password: "",
     },
   });
 
-  function onSubmit(values: LoginFormValues) {
-    console.log("Login submitted (simulated actual login):", values);
+  async function onSubmit(values: LoginFormValues) {
+    setIsLoading(true);
     
-    // Simulate successful login
-    localStorage.setItem('isSimulatedLoggedIn', 'true');
+    try {
+      const { data, error } = await signIn(values.email, values.password);
+      
+      if (error) {
+        toast({
+          title: "Error de Inicio de Sesión",
+          description: error.message === "Invalid login credentials" 
+            ? "Credenciales inválidas. Verifica tu email y contraseña."
+            : error.message,
+          variant: "destructive",
+        });
+        return;
+      }
 
-    toast({
-      title: "¡Inicio de Sesión Exitoso!",
-      description: "Serás redirigido a la página principal.",
-    });
-    router.push("/"); 
+      if (data.user) {
+        toast({
+          title: "¡Inicio de Sesión Exitoso!",
+          description: "Serás redirigido a la página principal.",
+        });
+        
+        // Check if there's a redirect URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectTo = urlParams.get('redirectTo');
+        
+        router.push(redirectTo || "/");
+        router.refresh();
+      }
+    } catch (error) {
+      console.error("Login error:", error);
+      toast({
+        title: "Error de Conexión",
+        description: "No se pudo conectar con el servidor. Inténtalo de nuevo.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   return (
-    <div className="container flex min-h-[calc(100vh-8rem)] items-center justify-center py-12 px-4"> {/* Adjusted min-height for header+footer */}
+    <div className="container flex min-h-[calc(100vh-8rem)] items-center justify-center py-12 px-4">
       <Card className="w-full max-w-md shadow-xl rounded-lg">
         <CardHeader className="text-center space-y-2 pt-8">
           <Icons.login className="mx-auto h-10 w-10 text-primary" />
@@ -59,12 +90,17 @@ export default function LoginPage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <FormField
                 control={form.control}
-                name="emailOrPhone"
+                name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email o Número de Teléfono</FormLabel>
+                    <FormLabel>Email</FormLabel>
                     <FormControl>
-                      <Input placeholder="tu@ejemplo.com o +1234567890" {...field} />
+                      <Input 
+                        type="email"
+                        placeholder="tu@ejemplo.com" 
+                        disabled={isLoading}
+                        {...field} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -77,14 +113,30 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>Contraseña</FormLabel>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} />
+                      <Input 
+                        type="password" 
+                        placeholder="••••••••" 
+                        disabled={isLoading}
+                        {...field} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full text-lg py-6 mt-2">
-                Iniciar Sesión
+              <Button 
+                type="submit" 
+                className="w-full text-lg py-6 mt-2"
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Icons.spinner className="mr-2 h-4 w-4 animate-spin" />
+                    Iniciando Sesión...
+                  </>
+                ) : (
+                  "Iniciar Sesión"
+                )}
               </Button>
             </form>
           </Form>
