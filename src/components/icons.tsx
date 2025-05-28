@@ -28,6 +28,7 @@ import {
   Users,
   Truck,
   LocateFixed, // Added icon
+  Loader2,
 } from 'lucide-react';
 
 // Define the LLEVA logo as a component using next/image
