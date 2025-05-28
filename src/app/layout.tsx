@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster"; // Import Toaster
 import { siteConfig } from "@/config/site";
 import { AppShell } from "@/components/layout/app-shell"; // Import AppShell
+import { AuthProvider } from "@/contexts/AuthContext"; // Import AuthProvider
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
