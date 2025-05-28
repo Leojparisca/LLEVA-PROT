@@ -1,9 +1,8 @@
-
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion"; // Import motion and AnimatePresence
+import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect, useRef } from 'react';
-import Image from 'next/image'; // Import next/image
+import Image from 'next/image';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,6 +21,12 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Icons } from "@/components/icons";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { createTrip, subscribeToTripUpdates } from "@/lib/trips";
+import { createDeliveryOrder, subscribeToDeliveryOrderUpdates } from "@/lib/delivery";
+import { getAllMerchants } from "@/lib/delivery";
+import { createRating } from "@/lib/ratings";
+import { seedMerchants } from "@/lib/seed-data";
 
 interface ChatMessage {
   id: string;
@@ -31,6 +36,7 @@ interface ChatMessage {
 }
 
 interface ActiveServiceInfo {
+  id?: string;
   type: string;
   providerName: string;
   vehicle?: string;
@@ -42,8 +48,8 @@ interface Merchant {
   id: string;
   name: string;
   category: string;
-  image: string;
-  dataAiHint: string;
+  image_url: string | null;
+  status: string;
 }
 
 interface ReceiptDetails {
@@ -60,15 +66,9 @@ const TOAST_TITLE_INCOMPLETE_FIELDS = "Campos Incompletos";
 const TOAST_TITLE_GEOLOCATION_UNSUPPORTED = "Geolocalización no Soportada";
 const TOAST_TITLE_LOCATION_ERROR = "Error de Ubicación";
 
-const mockMerchants: Merchant[] = [
-  { id: 'm1', name: 'Restaurante El Buen Sabor', category: 'Comida', image: 'https://placehold.co/100x100.png', dataAiHint: 'restaurant food' },
-  { id: 'm2', name: 'Farmacia La Saludable', category: 'Farmacia', image: 'https://placehold.co/100x100.png', dataAiHint: 'pharmacy medicine' },
-  { id: 'm3', name: 'Supermercado Todo Fresco', category: 'Supermercado', image: 'https://placehold.co/100x100.png', dataAiHint: 'supermarket groceries' },
-  { id: 'm4', name: 'Tienda de Regalos Detallitos', category: 'Regalos', image: 'https://placehold.co/100x100.png', dataAiHint: 'gift shop' },
-];
-
 export default function HomePage() {
   const { toast } = useToast();
+  const { user, profile } = useAuth();
   const [pickupLocation, setPickupLocation] = useState("");
   const [destination, setDestination] = useState("");
   const [vehicleType, setVehicleType] = useState("taxi");
@@ -78,7 +78,8 @@ export default function HomePage() {
   const [scheduledTime, setScheduledTime] = useState("12:00");
   const [estimatedTime, setEstimatedTime] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
-  const [showLogoAnimation, setShowLogoAnimation] = useState(true); 
+  const [showLogoAnimation, setShowLogoAnimation] = useState(true);
+  const [merchants, setMerchants] = useState<Merchant[]>([]);
 
   const [activeServiceTab, setActiveServiceTab] = useState("trips");
 
@@ -95,7 +96,6 @@ export default function HomePage() {
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const progressToastShownRef = useRef<{ '50': boolean; '90': boolean }>({ '50': false, '90': false });
 
-
   const [showRatingDialog, setShowRatingDialog] = useState(false);
   const [serviceToRateInfo, setServiceToRateInfo] = useState<ActiveServiceInfo | null>(null);
   const [currentRating, setCurrentRating] = useState(0);
@@ -104,23 +104,43 @@ export default function HomePage() {
   const [showReceiptDialog, setShowReceiptDialog] = useState(false);
   const [receiptDetails, setReceiptDetails] = useState<ReceiptDetails | null>(null);
 
+  // Load merchants on component mount
+  useEffect(() => {
+    const loadMerchants = async () => {
+      try {
+        // Seed merchants if they don't exist
+        await seedMerchants();
+        
+        // Load merchants
+        const { data, error } = await getAllMerchants();
+        if (data && !error) {
+          setMerchants(data);
+        } else {
+          console.error("Error loading merchants:", error);
+        }
+      } catch (error) {
+        console.error("Error loading merchants:", error);
+      }
+    };
+
+    loadMerchants();
+  }, []);
 
   useEffect(() => {
     setIsClient(true);
     const logoTimer = setTimeout(() => {
       setShowLogoAnimation(false);
-    }, 3000); 
+    }, 3000);
 
     return () => {
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
       }
-      clearTimeout(logoTimer); 
+      clearTimeout(logoTimer);
     };
   }, []);
 
-
-  useEffect(() => { 
+  useEffect(() => {
     if (chatAreaRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
@@ -142,12 +162,12 @@ export default function HomePage() {
           progressToastShownRef.current['50'] = true;
         }
         if (nextProgress >= 90 && !progressToastShownRef.current['90']) {
-            toast({ title: "Actualización de Servicio", description: "Tu proveedor está llegando a tu destino." });
-            progressToastShownRef.current['90'] = true;
+          toast({ title: "Actualización de Servicio", description: "Tu proveedor está llegando a tu destino." });
+          progressToastShownRef.current['90'] = true;
         }
         return nextProgress;
       });
-    }, 2000); 
+    }, 2000);
   };
 
   const handleGetCurrentLocation = () => {
@@ -162,7 +182,6 @@ export default function HomePage() {
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        // const { latitude, longitude } = position.coords; // Uncomment if using actual geocoding
         setPickupLocation(`Ubicación actual obtenida (simulación)`);
         toast({
           title: "Ubicación Obtenida",
@@ -187,93 +206,203 @@ export default function HomePage() {
     );
   };
 
-
-  const handleTripBooking = () => {
-    if (!pickupLocation || !destination) {
-      toast({ title: TOAST_TITLE_INCOMPLETE_FIELDS, description: "Por favor, ingrese el origen y el destino.", variant: "destructive" });
+  const handleTripBooking = async () => {
+    if (!user) {
+      toast({ 
+        title: "Autenticación Requerida", 
+        description: "Debes iniciar sesión para reservar un viaje.", 
+        variant: "destructive" 
+      });
       return;
     }
-    console.log("Buscando proveedor para viaje...");
-    setEstimatedTime(null);
-    toast({ title: "Buscando Conductor", description: "Estamos buscando el conductor más cercano para ti...", duration: 2500 });
 
-    setTimeout(() => {
-      const providerType = vehicleType === 'taxi' ? 'Taxi' : 'Moto-Taxi';
-      const providerName = vehicleType === 'taxi' ? 'Taxista Asignado' : 'Mototaxista Asignado';
-      const serviceDetail = vehicleType === 'taxi' ? taxiServiceType : '';
-
-      const serviceInfo: ActiveServiceInfo = {
-        type: providerType,
-        providerName: providerName,
-        vehicle: vehicleType,
-        taxiType: vehicleType === 'taxi' ? (taxiServiceType === 'básico' ? 'básico' : 'premium') : undefined,
-      };
-      setActiveServiceInfo(serviceInfo);
-      setChatMessages([
-        { id: `provider-start-${Date.now()}`, sender: 'provider', text: `¡Hola! Tu ${providerType.toLowerCase()} ${serviceDetail} está en camino.`.trim(), timestamp: new Date() }
-      ]);
-      setIsServiceActive(true);
-      startSimulatedProgress();
-
-      toast({
-        title: "¡Conductor Encontrado!",
-        description: `Tu ${providerType.toLowerCase()} ${serviceDetail} (${providerName}) ha sido asignado y está en camino.`,
-        duration: 5000,
+    if (!pickupLocation || !destination) {
+      toast({ 
+        title: TOAST_TITLE_INCOMPLETE_FIELDS, 
+        description: "Por favor, ingrese el origen y el destino.", 
+        variant: "destructive" 
       });
-    }, 3000);
-
-    if (bookingType === "now") {
-      const randomMinutes = Math.floor(Math.random() * (15 - 5 + 1)) + 5;
-      setEstimatedTime(`${randomMinutes} minutos`);
+      return;
     }
 
-    console.log("Reserva de viaje (pre-asignación):", {
-      pickupLocation,
-      destination,
-      vehicleType,
-      taxiServiceType: vehicleType === 'taxi' ? taxiServiceType : undefined,
-      bookingType,
-      scheduledDate: bookingType === 'later' ? scheduledDate : undefined,
-      scheduledTime: bookingType === 'later' ? scheduledTime : undefined,
-    });
+    console.log("Creando viaje en Supabase...");
+    setEstimatedTime(null);
+    toast({ title: "Creando Viaje", description: "Registrando tu solicitud de viaje...", duration: 2500 });
+
+    try {
+      // Create trip in Supabase
+      const tripData = {
+        customer_id: user.id,
+        pickup_location: pickupLocation,
+        destination: destination,
+        vehicle_type: vehicleType as 'taxi' | 'moto-taxi',
+        taxi_type: vehicleType === 'taxi' ? taxiServiceType : null,
+        scheduled_time: bookingType === 'later' && scheduledDate 
+          ? new Date(`${format(scheduledDate, 'yyyy-MM-dd')} ${scheduledTime}`).toISOString()
+          : null,
+        status: 'pending' as const
+      };
+
+      const { data: trip, error } = await createTrip(tripData);
+
+      if (error) {
+        console.error("Error creating trip:", error);
+        toast({
+          title: "Error al Crear Viaje",
+          description: "No se pudo crear tu solicitud de viaje. Inténtalo de nuevo.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (trip) {
+        toast({ 
+          title: "¡Viaje Creado!", 
+          description: "Tu solicitud ha sido registrada. Buscando conductor disponible...", 
+          duration: 3000 
+        });
+
+        // Simulate finding a driver after 3 seconds
+        setTimeout(() => {
+          const providerType = vehicleType === 'taxi' ? 'Taxi' : 'Moto-Taxi';
+          const providerName = vehicleType === 'taxi' ? 'Taxista Asignado' : 'Mototaxista Asignado';
+          const serviceDetail = vehicleType === 'taxi' ? taxiServiceType : '';
+
+          const serviceInfo: ActiveServiceInfo = {
+            id: trip.id,
+            type: providerType,
+            providerName: providerName,
+            vehicle: vehicleType,
+            taxiType: vehicleType === 'taxi' ? taxiServiceType : undefined,
+          };
+          
+          setActiveServiceInfo(serviceInfo);
+          setChatMessages([
+            { 
+              id: `provider-start-${Date.now()}`, 
+              sender: 'provider', 
+              text: `¡Hola! Tu ${providerType.toLowerCase()} ${serviceDetail} está en camino.`.trim(), 
+              timestamp: new Date() 
+            }
+          ]);
+          setIsServiceActive(true);
+          startSimulatedProgress();
+
+          toast({
+            title: "¡Conductor Encontrado!",
+            description: `Tu ${providerType.toLowerCase()} ${serviceDetail} (${providerName}) ha sido asignado y está en camino.`,
+            duration: 5000,
+          });
+        }, 3000);
+
+        if (bookingType === "now") {
+          const randomMinutes = Math.floor(Math.random() * (15 - 5 + 1)) + 5;
+          setEstimatedTime(`${randomMinutes} minutos`);
+        }
+      }
+    } catch (error) {
+      console.error("Error creating trip:", error);
+      toast({
+        title: "Error de Conexión",
+        description: "No se pudo conectar con el servidor. Inténtalo de nuevo.",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleDeliveryRequest = () => {
-    if (!selectedMerchantId || !pickupLocation || !destination || !deliveryOrderDetails) {
-      toast({ title: TOAST_TITLE_INCOMPLETE_FIELDS, description: "Por favor, selecciona un comercio, ingresa detalles del pedido, origen y destino.", variant: "destructive" });
+  const handleDeliveryRequest = async () => {
+    if (!user) {
+      toast({ 
+        title: "Autenticación Requerida", 
+        description: "Debes iniciar sesión para solicitar una entrega.", 
+        variant: "destructive" 
+      });
       return;
     }
-    console.log("Buscando repartidor para entrega de comercio...");
-    const merchant = mockMerchants.find(m => m.id === selectedMerchantId);
-    toast({ title: "Buscando Repartidor", description: `Estamos buscando un repartidor para tu pedido de ${merchant?.name || 'comercio'}...`, duration: 2500 });
 
-
-    setTimeout(() => {
-      const serviceInfo: ActiveServiceInfo = {
-        type: 'Entrega de Comercio',
-        providerName: 'Repartidor Asignado',
-        merchantName: merchant?.name || 'Comercio Desconocido',
-      };
-      setActiveServiceInfo(serviceInfo);
-      setChatMessages([
-        { id: `provider-start-${Date.now()}`, sender: 'provider', text: `¡Hola! Estoy gestionando tu pedido de ${merchant?.name}. Estaré en camino pronto.`, timestamp: new Date() }
-      ]);
-      setIsServiceActive(true);
-      startSimulatedProgress();
-
-      toast({
-        title: "¡Repartidor Asignado!",
-        description: `Un repartidor ha sido asignado para tu pedido de ${merchant?.name}.`,
-        duration: 5000,
+    if (!selectedMerchantId || !pickupLocation || !destination || !deliveryOrderDetails) {
+      toast({ 
+        title: TOAST_TITLE_INCOMPLETE_FIELDS, 
+        description: "Por favor, selecciona un comercio, ingresa detalles del pedido, origen y destino.", 
+        variant: "destructive" 
       });
-    }, 3000);
+      return;
+    }
 
-    console.log("Solicitud de entrega de comercio (pre-asignación):", {
-      merchantId: selectedMerchantId,
-      orderDetails: deliveryOrderDetails,
-      pickupLocation,
-      destination,
+    console.log("Creando orden de entrega en Supabase...");
+    const merchant = merchants.find(m => m.id === selectedMerchantId);
+    toast({ 
+      title: "Creando Orden", 
+      description: `Registrando tu pedido de ${merchant?.name || 'comercio'}...`, 
+      duration: 2500 
     });
+
+    try {
+      // Create delivery order in Supabase
+      const orderData = {
+        customer_id: user.id,
+        merchant_id: selectedMerchantId,
+        pickup_location: pickupLocation,
+        delivery_location: destination,
+        order_details: deliveryOrderDetails,
+        status: 'pending' as const
+      };
+
+      const { data: order, error } = await createDeliveryOrder(orderData);
+
+      if (error) {
+        console.error("Error creating delivery order:", error);
+        toast({
+          title: "Error al Crear Orden",
+          description: "No se pudo crear tu orden de entrega. Inténtalo de nuevo.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (order) {
+        toast({ 
+          title: "¡Orden Creada!", 
+          description: "Tu pedido ha sido registrado. Buscando repartidor disponible...", 
+          duration: 3000 
+        });
+
+        // Simulate finding a delivery person after 3 seconds
+        setTimeout(() => {
+          const serviceInfo: ActiveServiceInfo = {
+            id: order.id,
+            type: 'Entrega de Comercio',
+            providerName: 'Repartidor Asignado',
+            merchantName: merchant?.name || 'Comercio Desconocido',
+          };
+          
+          setActiveServiceInfo(serviceInfo);
+          setChatMessages([
+            { 
+              id: `provider-start-${Date.now()}`, 
+              sender: 'provider', 
+              text: `¡Hola! Estoy gestionando tu pedido de ${merchant?.name}. Estaré en camino pronto.`, 
+              timestamp: new Date() 
+            }
+          ]);
+          setIsServiceActive(true);
+          startSimulatedProgress();
+
+          toast({
+            title: "¡Repartidor Asignado!",
+            description: `Un repartidor ha sido asignado para tu pedido de ${merchant?.name}.`,
+            duration: 5000,
+          });
+        }, 3000);
+      }
+    } catch (error) {
+      console.error("Error creating delivery order:", error);
+      toast({
+        title: "Error de Conexión",
+        description: "No se pudo conectar con el servidor. Inténtalo de nuevo.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSendMessage = () => {
@@ -336,14 +465,13 @@ export default function HomePage() {
     setBookingType("now");
     setActiveServiceTab("trips");
 
-    setPickupLocation(""); 
+    setPickupLocation("");
     setDestination("");
     setSelectedMerchantId(undefined);
     setDeliveryOrderDetails("");
     setScheduledDate(undefined);
     setScheduledTime("12:00");
     setEstimatedTime(null);
-
 
     setShowRatingDialog(false);
     setCurrentRating(0);
@@ -360,21 +488,57 @@ export default function HomePage() {
     setSimulatedProgress(0);
     progressToastShownRef.current = { '50': false, '90': false };
 
-    toast({ title: "Listo para un nuevo servicio", description: "Puedes solicitar otro viaje o entrega cuando quieras.", duration: 4000});
+    toast({ title: "Listo para un nuevo servicio", description: "Puedes solicitar otro viaje o entrega cuando quieras.", duration: 4000 });
   };
 
-  const handleRatingSubmit = (rating: number, feedback: string) => {
-    console.log("Calificación Enviada:", {
-      rating,
-      feedback,
-      service: serviceToRateInfo
-    });
-    toast({
-      title: "¡Gracias por tu Opinión!",
-      description: "Tu calificación ha sido enviada.",
-    });
+  const handleRatingSubmit = async (rating: number, feedback: string) => {
+    if (!user || !serviceToRateInfo?.id) {
+      toast({
+        title: "Error",
+        description: "No se pudo enviar la calificación.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    if (serviceToRateInfo) showReceipt(serviceToRateInfo);
+    try {
+      const ratingData = {
+        user_id: user.id,
+        rating: rating,
+        feedback: feedback || null,
+        // Add trip_id or delivery_order_id based on service type
+        ...(serviceToRateInfo.type.includes('Entrega') 
+          ? { delivery_order_id: serviceToRateInfo.id }
+          : { trip_id: serviceToRateInfo.id }
+        )
+      };
+
+      const { error } = await createRating(ratingData);
+
+      if (error) {
+        console.error("Error creating rating:", error);
+        toast({
+          title: "Error al Calificar",
+          description: "No se pudo guardar tu calificación.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "¡Gracias por tu Opinión!",
+        description: "Tu calificación ha sido enviada.",
+      });
+
+      if (serviceToRateInfo) showReceipt(serviceToRateInfo);
+    } catch (error) {
+      console.error("Error submitting rating:", error);
+      toast({
+        title: "Error de Conexión",
+        description: "No se pudo conectar con el servidor.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSkipRating = () => {
@@ -385,12 +549,11 @@ export default function HomePage() {
     });
 
     if (serviceToRateInfo) {
-       showReceipt(serviceToRateInfo);
+      showReceipt(serviceToRateInfo);
     } else {
       finalizeServiceUI();
     }
   };
-
 
   if (!isClient) {
     return null;
@@ -505,70 +668,98 @@ export default function HomePage() {
               <Card className="shadow-xl w-full max-w-2xl">
                 <CardHeader>
                   <CardTitle className="text-2xl font-bold text-center">Elige tu Servicio</CardTitle>
+                  {user ? (
+                    <CardDescription className="text-center">
+                      ¡Hola {profile?.full_name || user.email}! ¿Qué servicio necesitas hoy?
+                    </CardDescription>
+                  ) : (
+                    <CardDescription className="text-center">
+                      <span className="text-orange-600">Debes iniciar sesión para usar nuestros servicios.</span>
+                    </CardDescription>
+                  )}
                 </CardHeader>
                 <CardContent>
-                <Tabs value={activeServiceTab} onValueChange={setActiveServiceTab} className="w-full">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="trips" className="flex items-center gap-2">
-                      <Icons.car className="h-5 w-5" /> Viajes
-                    </TabsTrigger>
-                    <TabsTrigger value="deliveries" className="flex items-center gap-2">
-                      <Icons.package className="h-5 w-5" /> Entregas
-                    </TabsTrigger>
-                  </TabsList>
+                  <Tabs value={activeServiceTab} onValueChange={setActiveServiceTab} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="trips" className="flex items-center gap-2">
+                        <Icons.car className="h-5 w-5" /> Viajes
+                      </TabsTrigger>
+                      <TabsTrigger value="deliveries" className="flex items-center gap-2">
+                        <Icons.package className="h-5 w-5" /> Entregas
+                      </TabsTrigger>
+                    </TabsList>
 
-                  <TabsContent value="trips" className="mt-6 space-y-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="pickup-trip">Lugar de Recogida</Label>
-                      <div className="flex items-center gap-2">
-                        <Input id="pickup-trip" placeholder="Ingresa lugar de recogida" value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} className="flex-grow"/>
-                        <Button variant="outline" size="icon" onClick={handleGetCurrentLocation} aria-label="Usar ubicación actual">
-                          <Icons.locateFixed className="h-5 w-5" />
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="destination-trip">Destino</Label>
-                      <Input id="destination-trip" placeholder="Ingresa destino" value={destination} onChange={(e) => setDestination(e.target.value)}/>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Tipo de Vehículo</Label>
-                      <Tabs value={vehicleType} onValueChange={setVehicleType} className="w-full">
-                        <TabsList className="grid w-full grid-cols-2">
-                          <TabsTrigger value="taxi" className="flex items-center gap-2">
-                            <Icons.car className="h-5 w-5" /> Taxi
-                          </TabsTrigger>
-                          <TabsTrigger value="moto-taxi" className="flex items-center gap-2">
-                            <Icons.motorcycle className="h-5 w-5" /> Moto-Taxi
-                          </TabsTrigger>
-                        </TabsList>
-                      </Tabs>
-                    </div>
-
-                    {vehicleType === 'taxi' && (
+                    <TabsContent value="trips" className="mt-6 space-y-6">
                       <div className="space-y-2">
-                        <Label>Modalidad de Taxi</Label>
-                        <Tabs value={taxiServiceType} onValueChange={(value) => setTaxiServiceType(value as 'básico' | 'premium')} className="w-full">
+                        <Label htmlFor="pickup-trip">Lugar de Recogida</Label>
+                        <div className="flex items-center gap-2">
+                          <Input 
+                            id="pickup-trip" 
+                            placeholder="Ingresa lugar de recogida" 
+                            value={pickupLocation} 
+                            onChange={(e) => setPickupLocation(e.target.value)} 
+                            className="flex-grow"
+                            disabled={!user}
+                          />
+                          <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={handleGetCurrentLocation} 
+                            aria-label="Usar ubicación actual"
+                            disabled={!user}
+                          >
+                            <Icons.locateFixed className="h-5 w-5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="destination-trip">Destino</Label>
+                        <Input 
+                          id="destination-trip" 
+                          placeholder="Ingresa destino" 
+                          value={destination} 
+                          onChange={(e) => setDestination(e.target.value)}
+                          disabled={!user}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Tipo de Vehículo</Label>
+                        <Tabs value={vehicleType} onValueChange={setVehicleType} className="w-full">
                           <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="básico" className="flex items-center gap-2">
-                              <Icons.car className="h-5 w-5" /> Básico
+                            <TabsTrigger value="taxi" className="flex items-center gap-2" disabled={!user}>
+                              <Icons.car className="h-5 w-5" /> Taxi
                             </TabsTrigger>
-                            <TabsTrigger value="premium" className="flex items-center gap-2">
-                              <Icons.sparkles className="h-5 w-5" /> Premium
+                            <TabsTrigger value="moto-taxi" className="flex items-center gap-2" disabled={!user}>
+                              <Icons.motorcycle className="h-5 w-5" /> Moto-Taxi
                             </TabsTrigger>
                           </TabsList>
                         </Tabs>
                       </div>
-                    )}
 
-                    <Tabs value={bookingType} onValueChange={setBookingType} className="w-full">
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="now">Reservar Ahora</TabsTrigger>
-                        <TabsTrigger value="later">Programar Después</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="later" className="mt-4 space-y-4">
-                         <div className="space-y-2">
+                      {vehicleType === 'taxi' && (
+                        <div className="space-y-2">
+                          <Label>Modalidad de Taxi</Label>
+                          <Tabs value={taxiServiceType} onValueChange={(value) => setTaxiServiceType(value as 'básico' | 'premium')} className="w-full">
+                            <TabsList className="grid w-full grid-cols-2">
+                              <TabsTrigger value="básico" className="flex items-center gap-2" disabled={!user}>
+                                <Icons.car className="h-5 w-5" /> Básico
+                              </TabsTrigger>
+                              <TabsTrigger value="premium" className="flex items-center gap-2" disabled={!user}>
+                                <Icons.sparkles className="h-5 w-5" /> Premium
+                              </TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                        </div>
+                      )}
+
+                      <Tabs value={bookingType} onValueChange={setBookingType} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="now" disabled={!user}>Reservar Ahora</TabsTrigger>
+                          <TabsTrigger value="later" disabled={!user}>Programar Después</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="later" className="mt-4 space-y-4">
+                          <div className="space-y-2">
                             <Label htmlFor="scheduledDate-trip">Fecha</Label>
                             <Popover>
                               <PopoverTrigger asChild>
@@ -579,6 +770,7 @@ export default function HomePage() {
                                     "w-full justify-start text-left font-normal",
                                     !scheduledDate && "text-muted-foreground"
                                   )}
+                                  disabled={!user}
                                 >
                                   <CalendarIcon className="mr-2 h-4 w-4" />
                                   {scheduledDate ? format(scheduledDate, "PPP", { locale: es }) : <span>Elige una fecha</span>}
@@ -590,13 +782,13 @@ export default function HomePage() {
                                   selected={scheduledDate}
                                   onSelect={setScheduledDate}
                                   initialFocus
-                                  disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() -1)) }
+                                  disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() - 1))}
                                   locale={es}
                                 />
                               </PopoverContent>
                             </Popover>
-                         </div>
-                         <div className="space-y-2">
+                          </div>
+                          <div className="space-y-2">
                             <Label htmlFor="scheduledTime-trip">Hora</Label>
                             <Input
                               id="scheduledTime-trip"
@@ -604,184 +796,213 @@ export default function HomePage() {
                               value={scheduledTime}
                               onChange={(e) => setScheduledTime(e.target.value)}
                               className="w-full"
+                              disabled={!user}
                             />
-                         </div>
-                      </TabsContent>
-                    </Tabs>
+                          </div>
+                        </TabsContent>
+                      </Tabs>
 
-                    {estimatedTime && bookingType === "now" && activeServiceTab === "trips" && (
-                      <div className="text-center text-primary font-semibold p-3 bg-primary/10 rounded-md">
-                        Llegada Estimada (antes de asignar): {estimatedTime}
-                      </div>
-                    )}
-                    <Button className="w-full text-lg py-6" onClick={handleTripBooking}>
-                      {bookingType === "now" ? "Buscar Viaje Ahora" : "Programar Viaje"}
-                    </Button>
-                  </TabsContent>
-
-                  <TabsContent value="deliveries" className="mt-6 space-y-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="merchant-select">Comercio Afiliado</Label>
-                      <Select value={selectedMerchantId} onValueChange={setSelectedMerchantId}>
-                        <SelectTrigger id="merchant-select">
-                          <SelectValue placeholder="Selecciona un comercio" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {mockMerchants.map(merchant => (
-                            <SelectItem key={merchant.id} value={merchant.id}>
-                              {merchant.name} ({merchant.category})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="deliveryOrderDetails">Detalles de tu pedido</Label>
-                      <Textarea
-                        id="deliveryOrderDetails"
-                        placeholder="Ej: 1 Pizza grande de pepperoni, 2 Coca-Colas. O instrucciones especiales para el repartidor."
-                        value={deliveryOrderDetails}
-                        onChange={(e) => setDeliveryOrderDetails(e.target.value)}
-                        rows={4}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="pickup-delivery">Lugar de Recogida (Comercio/Punto)</Label>
-                       <div className="flex items-center gap-2">
-                          <Input id="pickup-delivery" placeholder="Dirección del comercio o punto de recogida" value={pickupLocation} onChange={(e) => setPickupLocation(e.target.value)} className="flex-grow"/>
-                          <Button variant="outline" size="icon" onClick={handleGetCurrentLocation} aria-label="Usar ubicación actual para recogida de entrega">
-                             <Icons.locateFixed className="h-5 w-5" />
-                          </Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="destination-delivery">Tu Dirección de Entrega</Label>
-                      <Input id="destination-delivery" placeholder="Ingresa tu dirección" value={destination} onChange={(e) => setDestination(e.target.value)}/>
-                    </div>
-                    <Button className="w-full text-lg py-6" onClick={handleDeliveryRequest}>
-                      Solicitar Entrega de Comercio
-                    </Button>
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-      <Dialog open={showRatingDialog} onOpenChange={(isOpen) => { if (!isOpen && !showReceiptDialog) handleSkipRating(); }}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle className="text-center text-2xl">Califica tu Servicio</DialogTitle>
-            {serviceToRateInfo && (
-              <DialogDescription className="text-center pt-1">
-                ¿Cómo fue tu {serviceToRateInfo.type.toLowerCase()} con {serviceToRateInfo.providerName}
-                {serviceToRateInfo.merchantName ? ` (de ${serviceToRateInfo.merchantName})` : ''}?
-              </DialogDescription>
-            )}
-          </DialogHeader>
-          <div className="space-y-6 py-6">
-            <div className="flex justify-center space-x-1">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <div key={star} className="relative">
-                  <input
-                    type="radio"
-                    id={`rate-${star}`}
-                    name="rating"
-                    value={star}
-                    checked={currentRating === star}
-                    onChange={() => setCurrentRating(star)}
-                    className="sr-only"
-                    aria-label={`Calificar ${star} estrellas`}
-                  />
-                  <label
-                    htmlFor={`rate-${star}`}
-                    className={cn(
-                      "cursor-pointer h-10 w-10 rounded-full p-0 inline-flex items-center justify-center",
-                      currentRating >= star ? "text-yellow-400 hover:text-yellow-300" : "text-muted-foreground hover:text-yellow-400"
-                    )}
-                  >
-                    <Icons.star
-                      className={cn(
-                        "h-7 w-7 text-current",
-                        currentRating >= star && "fill-current text-yellow-400"
+                      {estimatedTime && bookingType === "now" && activeServiceTab === "trips" && (
+                        <div className="text-center text-primary font-semibold p-3 bg-primary/10 rounded-md">
+                          Llegada Estimada (antes de asignar): {estimatedTime}
+                        </div>
                       )}
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
-            <Textarea
-              placeholder="Deja un comentario adicional (opcional)..."
-              value={currentFeedback}
-              onChange={(e) => setCurrentFeedback(e.target.value)}
-              rows={4}
-              className="text-base"
-            />
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={handleSkipRating} className="w-full sm:w-auto">
-              Omitir
-            </Button>
-            <Button
-              onClick={() => handleRatingSubmit(currentRating, currentFeedback)}
-              disabled={currentRating === 0}
-              className="w-full sm:w-auto"
-            >
-              Enviar Calificación
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                      <Button 
+                        className="w-full text-lg py-6" 
+                        onClick={handleTripBooking}
+                        disabled={!user}
+                      >
+                        {bookingType === "now" ? "Buscar Viaje Ahora" : "Programar Viaje"}
+                      </Button>
+                    </TabsContent>
 
-      <Dialog open={showReceiptDialog} onOpenChange={(isOpen) => { if (!isOpen) finalizeServiceUI(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-center text-2xl">Recibo de Servicio</DialogTitle>
-          </DialogHeader>
-          {receiptDetails && (
-            <div className="space-y-4 py-4">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Tipo de Servicio:</span>
-                <span className="font-medium text-right">{receiptDetails.serviceType}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Proveedor:</span>
-                <span className="font-medium text-right">{receiptDetails.providerName}</span>
-              </div>
-              {receiptDetails.merchantName && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Comercio:</span>
-                  <span className="font-medium text-right">{receiptDetails.merchantName}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Fecha y Hora:</span>
-                <span className="font-medium text-right">{receiptDetails.date}</span>
-              </div>
-              <hr />
-              <div className="flex justify-between text-lg">
-                <span className="text-muted-foreground">Monto Total:</span>
-                <span className="font-semibold text-primary">{receiptDetails.amount}</span>
-              </div>
-               <div className="flex justify-between">
-                <span className="text-muted-foreground">Método de Pago:</span>
-                <span className="font-medium text-right">{receiptDetails.paymentMethod}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">ID Transacción:</span>
-                <span className="font-mono text-xs text-right">{receiptDetails.transactionId}</span>
-              </div>
+                    <TabsContent value="deliveries" className="mt-6 space-y-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="merchant-select">Comercio Afiliado</Label>
+                        <Select value={selectedMerchantId} onValueChange={setSelectedMerchantId} disabled={!user}>
+                          <SelectTrigger id="merchant-select">
+                            <SelectValue placeholder="Selecciona un comercio" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {merchants.map(merchant => (
+                              <SelectItem key={merchant.id} value={merchant.id}>
+                                {merchant.name} ({merchant.category})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="deliveryOrderDetails">Detalles de tu pedido</Label>
+                        <Textarea
+                          id="deliveryOrderDetails"
+                          placeholder="Ej: 1 Pizza grande de pepperoni, 2 Coca-Colas. O instrucciones especiales para el repartidor."
+                          value={deliveryOrderDetails}
+                          onChange={(e) => setDeliveryOrderDetails(e.target.value)}
+                          rows={4}
+                          disabled={!user}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="pickup-delivery">Lugar de Recogida (Comercio/Punto)</Label>
+                        <div className="flex items-center gap-2">
+                          <Input 
+                            id="pickup-delivery" 
+                            placeholder="Dirección del comercio o punto de recogida" 
+                            value={pickupLocation} 
+                            onChange={(e) => setPickupLocation(e.target.value)} 
+                            className="flex-grow"
+                            disabled={!user}
+                          />
+                          <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={handleGetCurrentLocation} 
+                            aria-label="Usar ubicación actual para recogida de entrega"
+                            disabled={!user}
+                          >
+                            <Icons.locateFixed className="h-5 w-5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="destination-delivery">Tu Dirección de Entrega</Label>
+                        <Input 
+                          id="destination-delivery" 
+                          placeholder="Ingresa tu dirección" 
+                          value={destination} 
+                          onChange={(e) => setDestination(e.target.value)}
+                          disabled={!user}
+                        />
+                      </div>
+                      <Button 
+                        className="w-full text-lg py-6" 
+                        onClick={handleDeliveryRequest}
+                        disabled={!user}
+                      >
+                        Solicitar Entrega de Comercio
+                      </Button>
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
             </div>
           )}
-          <DialogFooter>
-            <Button onClick={() => finalizeServiceUI()} className="w-full">Cerrar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </motion.div>
-    )}
-  </AnimatePresence>
+
+          <Dialog open={showRatingDialog} onOpenChange={(isOpen) => { if (!isOpen && !showReceiptDialog) handleSkipRating(); }}>
+            <DialogContent className="sm:max-w-[480px]">
+              <DialogHeader>
+                <DialogTitle className="text-center text-2xl">Califica tu Servicio</DialogTitle>
+                {serviceToRateInfo && (
+                  <DialogDescription className="text-center pt-1">
+                    ¿Cómo fue tu {serviceToRateInfo.type.toLowerCase()} con {serviceToRateInfo.providerName}
+                    {serviceToRateInfo.merchantName ? ` (de ${serviceToRateInfo.merchantName})` : ''}?
+                  </DialogDescription>
+                )}
+              </DialogHeader>
+              <div className="space-y-6 py-6">
+                <div className="flex justify-center space-x-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <div key={star} className="relative">
+                      <input
+                        type="radio"
+                        id={`rate-${star}`}
+                        name="rating"
+                        value={star}
+                        checked={currentRating === star}
+                        onChange={() => setCurrentRating(star)}
+                        className="sr-only"
+                        aria-label={`Calificar ${star} estrellas`}
+                      />
+                      <label
+                        htmlFor={`rate-${star}`}
+                        className={cn(
+                          "cursor-pointer h-10 w-10 rounded-full p-0 inline-flex items-center justify-center",
+                          currentRating >= star ? "text-yellow-400 hover:text-yellow-300" : "text-muted-foreground hover:text-yellow-400"
+                        )}
+                      >
+                        <Icons.star
+                          className={cn(
+                            "h-7 w-7 text-current",
+                            currentRating >= star && "fill-current text-yellow-400"
+                          )}
+                        />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <Textarea
+                  placeholder="Deja un comentario adicional (opcional)..."
+                  value={currentFeedback}
+                  onChange={(e) => setCurrentFeedback(e.target.value)}
+                  rows={4}
+                  className="text-base"
+                />
+              </div>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={handleSkipRating} className="w-full sm:w-auto">
+                  Omitir
+                </Button>
+                <Button
+                  onClick={() => handleRatingSubmit(currentRating, currentFeedback)}
+                  disabled={currentRating === 0}
+                  className="w-full sm:w-auto"
+                >
+                  Enviar Calificación
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={showReceiptDialog} onOpenChange={(isOpen) => { if (!isOpen) finalizeServiceUI(); }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-center text-2xl">Recibo de Servicio</DialogTitle>
+              </DialogHeader>
+              {receiptDetails && (
+                <div className="space-y-4 py-4">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Tipo de Servicio:</span>
+                    <span className="font-medium text-right">{receiptDetails.serviceType}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Proveedor:</span>
+                    <span className="font-medium text-right">{receiptDetails.providerName}</span>
+                  </div>
+                  {receiptDetails.merchantName && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Comercio:</span>
+                      <span className="font-medium text-right">{receiptDetails.merchantName}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Fecha y Hora:</span>
+                    <span className="font-medium text-right">{receiptDetails.date}</span>
+                  </div>
+                  <hr />
+                  <div className="flex justify-between text-lg">
+                    <span className="text-muted-foreground">Monto Total:</span>
+                    <span className="font-semibold text-primary">{receiptDetails.amount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Método de Pago:</span>
+                    <span className="font-medium text-right">{receiptDetails.paymentMethod}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">ID Transacción:</span>
+                    <span className="font-mono text-xs text-right">{receiptDetails.transactionId}</span>
+                  </div>
+                </div>
+              )}
+              <DialogFooter>
+                <Button onClick={() => finalizeServiceUI()} className="w-full">Cerrar</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
