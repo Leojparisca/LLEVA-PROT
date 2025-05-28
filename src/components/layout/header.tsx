@@ -4,8 +4,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-// Removed Image from "next/image" as it's no longer used here if only wordmark is removed.
-// If Icons.logo still uses next/image, it will be imported there.
 import { Menu, X } from "lucide-react";
 
 import { siteConfig } from "@/config/site";
@@ -21,23 +19,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-interface MockUser {
-  name: string;
-  avatarUrl: string;
-  balance: number;
-}
-
-const mockUserData: MockUser = {
-  name: "Alex Rider", 
-  avatarUrl: "https://placehold.co/40x40.png", 
-  balance: 75.50, 
-};
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 export function AppHeader() {
   const pathname = usePathname();
+  const { user, profile, loading, signOut: authSignOut } = useAuth();
+  const { toast } = useToast();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
-  const [loggedInUser, setLoggedInUser] = React.useState<MockUser | null>(null); 
   const [theme, setTheme] = React.useState<"light" | "dark">("light");
 
   React.useEffect(() => {
@@ -66,15 +55,20 @@ export function AppHeader() {
     setTheme((prevTheme) => (prevTheme === "light" ? "dark" : "light"));
   };
 
-  React.useEffect(() => {
-    if (typeof window !== "undefined" && localStorage.getItem('isSimulatedLoggedIn') === 'true') {
-      setLoggedInUser(mockUserData);
+  const handleLogout = async () => {
+    try {
+      await authSignOut();
+      toast({
+        title: "Sesión Cerrada",
+        description: "Has cerrado sesión exitosamente.",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "No se pudo cerrar la sesión. Inténtalo de nuevo.",
+        variant: "destructive",
+      });
     }
-  }, [pathname]); 
-
-  const handleLogout = () => {
-    localStorage.removeItem('isSimulatedLoggedIn'); 
-    setLoggedInUser(null);
   };
   
   React.useEffect(() => {
@@ -84,12 +78,39 @@ export function AppHeader() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
+  const getUserDisplayName = () => {
+    if (profile?.full_name) {
+      return profile.full_name;
+    }
+    if (user?.email) {
+      return user.email.split('@')[0];
+    }
+    return "Usuario";
+  };
+
+  const getUserInitials = () => {
+    const name = getUserDisplayName();
+    return name.charAt(0).toUpperCase();
+  };
+
   const Logo = () => (
     <Link href="/" className="flex items-center space-x-2 ml-4" onClick={() => isMobileMenuOpen && setIsMobileMenuOpen(false)}>
       <Icons.logo className="h-8 w-8" /> 
-      {/* The LLEVA wordmark Image component has been removed from here */}
     </Link>
   );
+
+  if (loading) {
+    return (
+      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-16 max-w-screen-2xl items-center justify-between">
+          <Logo />
+          <div className="flex items-center gap-2">
+            <div className="h-9 w-9 rounded-full bg-muted animate-pulse" />
+          </div>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -129,26 +150,27 @@ export function AppHeader() {
 
           {/* Auth Buttons / User Menu (Desktop) */}
           <div className="hidden md:flex items-center gap-2">
-            {loggedInUser ? (
+            {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0">
                     <Avatar className="h-9 w-9">
-                      <AvatarImage src={loggedInUser.avatarUrl} alt={loggedInUser.name} data-ai-hint="user avatar" />
-                      <AvatarFallback>{loggedInUser.name.charAt(0).toUpperCase()}</AvatarFallback>
+                      <AvatarImage src={profile?.avatar_url || ""} alt={getUserDisplayName()} />
+                      <AvatarFallback>{getUserInitials()}</AvatarFallback>
                     </Avatar>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="w-56" align="end" forceMount>
                   <DropdownMenuLabel className="font-normal">
                     <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium leading-none">{loggedInUser.name}</p>
+                      <p className="text-sm font-medium leading-none">{getUserDisplayName()}</p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {profile?.user_type === "customer" && "Cliente"}
+                        {profile?.user_type === "driver" && "Conductor"}
+                        {profile?.user_type === "delivery_person" && "Repartidor"}
+                      </p>
                     </div>
                   </DropdownMenuLabel>
-                  <DropdownMenuItem>
-                    <Icons.wallet className="mr-2 h-4 w-4" />
-                    Saldo: ${loggedInUser.balance.toFixed(2)}
-                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {siteConfig.navItems.map((item) => ( 
                     <DropdownMenuItem key={`desktop-dd-${item.href}`} asChild>
@@ -164,6 +186,14 @@ export function AppHeader() {
                       Perfil
                     </Link>
                   </DropdownMenuItem>
+                  {profile?.user_type === "driver" && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/driver-profile">
+                        <Icons.car className="mr-2 h-4 w-4" />
+                        Perfil de Conductor
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={handleLogout}>
                     <Icons.logout className="mr-2 h-4 w-4" />
                     Cerrar Sesión
@@ -217,11 +247,15 @@ export function AppHeader() {
               </Link>
             ))}
             <hr className="my-2 border-border/60" />
-            {loggedInUser ? (
+            {user ? (
               <>
                  <div className="px-2 py-2">
-                    <p className="text-sm font-medium leading-none">{loggedInUser.name}</p>
-                    <p className="text-xs text-muted-foreground">Saldo: ${loggedInUser.balance.toFixed(2)}</p>
+                    <p className="text-sm font-medium leading-none">{getUserDisplayName()}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {profile?.user_type === "customer" && "Cliente"}
+                      {profile?.user_type === "driver" && "Conductor"}
+                      {profile?.user_type === "delivery_person" && "Repartidor"}
+                    </p>
                  </div>
                  <Link href="/profile" 
                    className={cn(buttonVariants({ variant: "ghost" }), "w-full justify-start px-2 py-2 text-sm")}
@@ -229,6 +263,14 @@ export function AppHeader() {
                   >
                     <Icons.user className="mr-2 h-4 w-4" /> Perfil
                  </Link>
+                 {profile?.user_type === "driver" && (
+                   <Link href="/driver-profile" 
+                     className={cn(buttonVariants({ variant: "ghost" }), "w-full justify-start px-2 py-2 text-sm")}
+                     onClick={() => setIsMobileMenuOpen(false)}
+                    >
+                      <Icons.car className="mr-2 h-4 w-4" /> Perfil de Conductor
+                   </Link>
+                 )}
                 <Button variant="outline" className="w-full justify-start px-2 py-2 text-sm" onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}>
                   <Icons.logout className="mr-2 h-4 w-4" /> Cerrar Sesión
                 </Button>
