@@ -75,4 +75,5 @@ export const Icons = {
   logo: LlevaImageLogo,
   locateFixed: LocateFixed, // Added icon
   spinner: Loader2, // Added spinner icon
+  checkCircle: CheckCircle, // Added check circle icon
 };
