@@ -17,7 +17,7 @@ class LLEVAAPITester:
         self.user_id = None
         self.tests_run = 0
         self.tests_passed = 0
-        self.test_user_email = f"test_user_{int(time.time())}@example.com"
+        self.test_user_email = f"test.user.{int(time.time())}@gmail.com"
         self.test_user_password = "Test123456!"
 
     def run_test(self, name, method, endpoint, expected_status, data=None, auth_required=False):
