@@ -1,0 +1,114 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* White */
+    --foreground: 0 0% 3.9%; /* Almost Black */
+
+    --card: 0 0% 98%; /* Very Light Gray / Off-white */
+    --card-foreground: 0 0% 3.9%;
+
+    --popover: 0 0% 98%;
+    --popover-foreground: 0 0% 3.9%;
+
+    --primary: 151 70% 40%; /* New Primary Green */
+    --primary-foreground: 0 0% 98%; /* Light text for contrast on green */
+
+    --secondary: 0 0% 96.1%; /* Light Gray */
+    --secondary-foreground: 0 0% 9%; /* Dark Gray */
+
+    --muted: 0 0% 96.1%; 
+    --muted-foreground: 0 0% 45.1%; /* Medium Gray */
+
+    --accent: 151 70% 40%; /* New Accent Green */
+    --accent-foreground: 0 0% 98%; /* Light text for contrast on green */
+
+    --destructive: 0 84.2% 60.2%; /* Standard destructive red */
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 0 0% 89.8%; /* Light Gray Border */
+    --input: 0 0% 89.8%; /* Input border matches general border */
+    --ring: 151 70% 40%; /* New Ring Green */
+
+    --radius: 0.75rem; /* More rounded look */
+
+    /* Chart colors for light theme - Green palette */
+    --chart-1: 151 70% 40%;   /* Primary Green */
+    --chart-2: 240 4.8% 60%; /* A medium-light gray */
+    --chart-3: 151 70% 30%;   /* A darker green */
+    --chart-4: 240 4.8% 40%; /* A darker gray */
+    --chart-5: 130 60% 55%;  /* A lighter, slightly more yellow-green */
+    
+    /* Sidebar specific colors for light theme - Green palette */
+    --sidebar-background: 0 0% 99%; 
+    --sidebar-foreground: 0 0% 3.9%;
+    --sidebar-primary: 151 70% 40%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 151 70% 40%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 0 0% 93%;
+    --sidebar-ring: 151 70% 40%;
+  }
+
+  .dark {
+    --background: 149.27 100% 6%; /* Darker version of user specified HSL for #002914 - Further Darkened */
+    --foreground: 0 0% 95%; /* Keep as is */
+
+    --card: 151 47% 14%; /* #103623 */
+    --card-foreground: 0 0% 95%; /* Keep as is */
+
+    --popover: 151 47% 14%; /* #103623 */
+    --popover-foreground: 0 0% 95%; /* Keep as is */
+
+    --primary: 149 100% 16.08%; /* #002914 - Retaining this as potentially distinct from new darker background */
+    --primary-foreground: 0 0% 98%; /* Keep as is - light text on this green is fine */
+
+    --secondary: 151 47% 12%; /* Derived from #103623 - slightly darker */
+    --secondary-foreground: 0 0% 70%; /* Keep as is */
+
+    --muted: 151 47% 10%; /* Derived from #103623 - darker than secondary, now lighter than background */
+    --muted-foreground: 0 0% 50%; /* Keep as is */
+
+    --accent: 100 100% 57%; /* #6cff23 */
+    --accent-foreground: 0 0% 3.9%; /* CHANGED for contrast: Dark text on bright green */
+
+    --destructive: 0 70% 50%; /* Standard destructive red - Keep as is */
+    --destructive-foreground: 0 0% 98%; /* Keep as is */
+
+    --border: 151 47% 17%; /* Derived from #103623 - slightly lighter for borders */
+    --input: 151 47% 17%; /* Same as border */
+    --ring: 149 100% 16.08%; /* #002914 - Same as primary */
+
+    /* Chart colors for dark theme - Green palette */
+    --chart-1: 149 100% 16.08%;   /* #002914 - Same as primary */
+    --chart-2: 100 100% 57%;   /* #6cff23 */
+    --chart-3: 151 80% 30%;   /* Darker variant of #00ba5a */
+    --chart-4: 100 80% 45%;   /* Darker variant of #6cff23 */
+    --chart-5: 151 70% 25%;   /* Another distinct green shade */
+
+    /* Sidebar specific colors for dark theme - Green palette */
+    --sidebar-background: 149.27 100% 6%; /* Darker version of user specified HSL for #002914 - Further Darkened */
+    --sidebar-foreground: 0 0% 95%; /* Keep as is */
+    --sidebar-primary: 149 100% 16.08%; /* #002914 - Same as primary */
+    --sidebar-primary-foreground: 0 0% 98%; /* Keep as is */
+    --sidebar-accent: 100 100% 57%; /* #6cff23 */
+    --sidebar-accent-foreground: 0 0% 3.9%; /* CHANGED for contrast: Dark text on bright green */
+    --sidebar-border: 151 47% 14%; /* #103623 */
+    --sidebar-ring: 149 100% 16.08%; /* #002914 - Same as primary */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Apply antialiasing for smoother fonts */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
